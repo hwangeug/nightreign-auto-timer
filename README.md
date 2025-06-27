@@ -35,6 +35,7 @@ The interface is discreet, draggable, always on top, and can be controlled throu
 | Ctrl + H | Toggle overlay visibility           |
 | Ctrl + B | Toggle transparent background       |
 | Ctrl + S | Manually start a timer sequence     |
+| Ctrl + D | Toggle HDR tone mapping             |
 
 ---
 
@@ -74,3 +75,4 @@ pyinstaller --noconsole --onefile --icon=timer.ico --add-data "Tesseract-OCR;Tes
 ## 💬 Support / Suggestions
 
 For feedback, issues, or improvements — feel free to open a GitHub issue or comment on the Nexus Mods page!
+

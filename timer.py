@@ -34,10 +34,11 @@ masque = False
 background = False
 interruption = False
 x_position = y_position = None
+hdr = False
 
 # === Config loader ===
 def load_config():
-    global x_position, y_position, background
+    global x_position, y_position, background, hdr
     if not os.path.exists(CONFIG_FILE):
         return
     try:
@@ -47,6 +48,8 @@ def load_config():
                     x_position, y_position = map(int, line.strip().split("=")[1].split(","))
                 elif line.startswith("background="):
                     background = bool(int(line.strip().split("=")[1]))
+                elif line.startswith("hdr="):
+                    hdr = line.strip().split("=")[1] == "True"
     except Exception as e:
         print(f"Erreur lecture config : {e}")
 
@@ -56,6 +59,7 @@ def save_config():
         with open(CONFIG_FILE, "w") as f:
             f.write(f"position={x_position},{y_position}\n")
             f.write(f"background={int(background)}\n")
+            f.write(f"hdr={str(hdr)}\n")
     except Exception as e:
         print(f"Erreur sauvegarde config : {e}")
 
@@ -129,17 +133,29 @@ def update_labels(texte, temps=None):
 
 # === Détection OCR ===
 def check_jour_text():
+    global hdr
+
     os.makedirs(OCR_LOG_DIR, exist_ok=True)
     img = ImageGrab.grab()
     img_np = np.array(img)
-    gray = cv2.cvtColor(img_np, cv2.COLOR_BGR2GRAY)
 
     width, height = img.size
     top = int(height * 0.5)
     bottom = int(height * 0.65)
     left = int(width * 0.35)
     right = int(width * 0.65)
-    cropped = gray[top:bottom, left:right]
+    
+    if hdr:
+        # Keep in color for tone mapping
+        bgr = cv2.cvtColor(img_np, cv2.COLOR_RGB2BGR)
+        cropped = bgr[top:bottom, left:right]
+        
+        # Basic tone mapping filter
+        cropped = cv2.normalize(cropped, None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX)
+        cropped = np.uint8(cropped)
+    else:
+        gray = cv2.cvtColor(img_np, cv2.COLOR_BGR2GRAY)
+        cropped = gray[top:bottom, left:right]
 
     _, cropped = cv2.threshold(cropped, 200, 255, cv2.THRESH_BINARY_INV)
     cropped = cv2.medianBlur(cropped, 3)
@@ -212,7 +228,7 @@ def boucle_detection():
     global etat, thread_en_cours
     while True:
         if etat == "WAITING" and not thread_en_cours:
-            update_labels("Waiting for \nexpedition...")
+            update_labels(f"Waiting for \nexpedition{' (HDR)' if hdr else ''}...")
             if check_jour_text():
                 threading.Thread(target=lancer_timers).start()
         time.sleep(0.2)  # Réduction du délai à 100 ms
@@ -243,12 +259,18 @@ def toggle_background():
 def lancer_timers_manuel():
     threading.Thread(target=lancer_timers).start()
 
+def toggle_hdr():
+    global hdr
+    hdr = not hdr
+    save_config()
+
 def setup_hotkeys():
     kb.add_hotkey('ctrl+r', reset_timer)
     kb.add_hotkey('ctrl+q', quit_app)
     kb.add_hotkey('ctrl+h', toggle_visibility)
     kb.add_hotkey('ctrl+b', toggle_background)
     kb.add_hotkey('ctrl+s', lancer_timers_manuel)
+    kb.add_hotkey('ctrl+d', toggle_hdr)
 
 setup_hotkeys()
 
@@ -257,3 +279,4 @@ try:
 except KeyboardInterrupt:
     print("Arrêt manuel du programme.")
     quit_app()
+
