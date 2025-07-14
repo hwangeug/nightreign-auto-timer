@@ -36,6 +36,7 @@ The interface is discreet, draggable, always on top, and can be controlled throu
 | Ctrl + B | Toggle transparent background       |
 | Ctrl + S | Manually start a timer sequence     |
 | Ctrl + D | Toggle HDR tone mapping             |
+| Ctrl + N | Start timer on day 2                |
 
 ---
 
