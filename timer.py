@@ -10,6 +10,15 @@ import tkinter as tk
 import keyboard as kb
 import sys
 
+# === Figure out where the file is running from, accounting for PyInstaller ===
+def get_executable_dir():
+    if getattr(sys, 'frozen', False):
+        # Running in a PyInstaller bundle
+        return os.path.dirname(sys.executable)
+    else:
+        # Running as a normal Python script
+        return os.path.dirname(os.path.abspath(__file__))
+
 # === Chemin et OCR ===
 if getattr(sys, 'frozen', False):
     BASE_PATH = sys._MEIPASS
@@ -20,15 +29,18 @@ TESSERACT_PATH = os.path.join(BASE_PATH, "Tesseract-OCR", "tesseract.exe")
 pytesseract.pytesseract.tesseract_cmd = TESSERACT_PATH
 
 # === Constantes ===
-CONFIG_FILE = os.path.join(BASE_PATH, "config.txt")
+CONFIG_FILE = os.path.join(get_executable_dir(), "config.txt")
 WORDS_TARGET = ["JOUR", "DAY", "TAG", "GIORNO", "DIA"]
 TIMERS_CYCLE_1 = [268, 179, 209, 179]
 TIMERS_CYCLE_2 = [265, 179, 209, 179]
-OCR_LOG_DIR = os.path.join(BASE_PATH, "ocr_logs")
+
+# Only dump debugging images if running from .py file
+OCR_LOG_DIR = os.path.join(BASE_PATH, "ocr_logs") if not getattr(sys, 'frozen', False) else None
 
 # === États globaux ===
 timer_durations = TIMERS_CYCLE_1.copy()
 thread_en_cours = False
+timer_thread = None
 etat = "WAITING"
 masque = False
 background = False
@@ -135,7 +147,6 @@ def update_labels(texte, temps=None):
 def check_jour_text():
     global hdr
 
-    os.makedirs(OCR_LOG_DIR, exist_ok=True)
     img = ImageGrab.grab()
     img_np = np.array(img)
 
@@ -160,9 +171,11 @@ def check_jour_text():
     _, cropped = cv2.threshold(cropped, 200, 255, cv2.THRESH_BINARY_INV)
     cropped = cv2.medianBlur(cropped, 3)
 
-    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    filename = os.path.join(OCR_LOG_DIR, f"ocr_debug_{timestamp}.png")
-    cv2.imwrite(filename, cropped)
+    if OCR_LOG_DIR is not None:
+        os.makedirs(OCR_LOG_DIR, exist_ok=True)
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = os.path.join(OCR_LOG_DIR, f"ocr_debug_{timestamp}.png")
+        cv2.imwrite(filename, cropped)
 
     text = pytesseract.image_to_string(cropped, lang='eng', config='--oem 3 --psm 7')
     text_upper = text.upper()
@@ -182,29 +195,34 @@ def executer_cycle():
             update_labels(label_text, t)
             time.sleep(1)
 
-def lancer_timers():
+def lancer_timers(start_day=1):
+    if start_day not in (1, 2):
+        raise ValueError("Day must be 1 or 2!")
+
     global thread_en_cours, etat, interruption, timer_durations
     if thread_en_cours:
         return
     thread_en_cours = True
     interruption = False
 
-    timer_durations = TIMERS_CYCLE_1.copy()
-    etat = "TIMER"
-    executer_cycle()
-    if interruption:
-        thread_en_cours = False
-        return
-    update_labels("Boss")
-    etat = "WAITING_2"
-
-    while etat == "WAITING_2":
+    # Skip day 1 if we are trying to start the timer directly in day 2 (i.e. "advancing" the timer)
+    if start_day == 1:
+        timer_durations = TIMERS_CYCLE_1.copy()
+        etat = "TIMER"
+        executer_cycle()
         if interruption:
             thread_en_cours = False
             return
-        if check_jour_text():
-            break
-        time.sleep(0.2)  # Réduction du délai à 100 ms
+        update_labels("Boss")
+        etat = "WAITING_2"
+
+        while etat == "WAITING_2":
+            if interruption:
+                thread_en_cours = False
+                return
+            if check_jour_text():
+                break
+            time.sleep(0.2)  # Réduction du délai à 100 ms
 
     timer_durations = TIMERS_CYCLE_2.copy()
     etat = "TIMER"
@@ -239,6 +257,8 @@ threading.Thread(target=boucle_detection, daemon=True).start()
 def reset_timer():
     global etat, interruption, thread_en_cours
     interruption = True
+    if timer_thread:
+        timer_thread.join()
     thread_en_cours = False
     etat = "WAITING"
 
@@ -256,8 +276,19 @@ def toggle_background():
     save_config()
     update_labels(label.cget("text"))
 
-def lancer_timers_manuel():
-    threading.Thread(target=lancer_timers).start()
+def lancer_timers_manuel(start_day=1):
+    global timer_thread
+    if timer_thread and timer_thread.is_alive():
+        return                       # already running
+    timer_thread = threading.Thread(
+        target=lancer_timers,
+        kwargs={"start_day": start_day},
+        daemon=True)
+    timer_thread.start()
+
+def advance_day_manual():
+    reset_timer()
+    lancer_timers_manuel(start_day=2)
 
 def toggle_hdr():
     global hdr
@@ -271,6 +302,7 @@ def setup_hotkeys():
     kb.add_hotkey('ctrl+b', toggle_background)
     kb.add_hotkey('ctrl+s', lancer_timers_manuel)
     kb.add_hotkey('ctrl+d', toggle_hdr)
+    kb.add_hotkey('ctrl+n', advance_day_manual)
 
 setup_hotkeys()
 
